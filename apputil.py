@@ -1,84 +1,97 @@
+"""Utility helpers for week-9 exercises.
+
+Provides GroupEstimate class for computing group-level estimates (mean or median)
+and predicting them for new data.
+"""
+
 import pandas as pd
 import numpy as np
 
 
-class GroupEstimate(object):
-    """
-    A class for estimating values based on categorical groups.
+class GroupEstimate:
+    """Estimate group-level target values and predict by joining groups.
 
-    This class fits a model on categorical data and predicts estimates
-    (mean or median) for new observations based on group membership.
-    Supports handling missing groups with a default category fallback.
+    Parameters
+    ----------
+    estimate : {'mean', 'median'}
+        Aggregation type for each group.
+
+    Attributes
+    ----------
+    grouped_data : pd.DataFrame or None
+        Grouped data with aggregated targets.
+    columns_ : list or None
+        Grouping column names.
     """
 
     def __init__(self, estimate):
-        """
-        Initialize the GroupEstimate model.
-
-        Parameters:
-        estimate (str): The estimation method, either 'mean' or 'median'.
-        """
+        # validate estimate choice
+        if estimate not in ["mean", "median"]:
+            raise ValueError(f"Estimate must be 'mean' or 'median', got '{estimate}'")
         self.estimate = estimate
         self.grouped_data = None
-        estimate_methods = {
-            'mean': self._mean_estimate,
-            'median': self._median_estimate
-        }
-        if estimate not in estimate_methods:
-            raise ValueError(f"Estimate method '{estimate}' not recognized.")
-        self.estimate_method = estimate_methods[estimate]
+        self.columns_ = None
 
-    def _mean_estimate(self, data):
-        """Calculate the mean of the data."""
-        return data.mean()
+    def fit(self, X, y):
+        """Compute grouped estimates from X and y.
 
-    def _median_estimate(self, data):
-        """Calculate the median of the data."""
-        return data.median()
-
-    def fit(self, X, y, default_category=None):
+        Parameters
+        ----------
+        X : array-like or pd.DataFrame
+            Feature table for grouping.
+        y : array-like or pd.Series
+            Target values to aggregate.
         """
-        Fit the model on training data.
-
-        Parameters:
-        X (array-like or DataFrame): Categorical features.
-        y (array-like): Target values.
-        default_category (str, optional): Column name for default grouping
-                                          in case of missing combinations.
-        """
+        # Ensure inputs are DataFrame/Series for consistent operations
         X = pd.DataFrame(X)
         y = pd.Series(y)
-        self.grouped_data = X.copy()
-        self.grouped_data['target'] = y
-        # Group by all columns and compute estimate per group
-        self.grouped_data = self.grouped_data.groupby(list(X.columns))['target'].apply(self.estimate_method).reset_index()
-        self.default_category = default_category
-        if default_category is not None:
-            # Compute estimates per default category for fallback
-            self.default_grouped = self.grouped_data.groupby(default_category)['target'].apply(self.estimate_method).reset_index()
-        return None
+
+        # Basic sanity check: rows must match
+        if X.shape[0] != len(y):
+            raise ValueError("X and y must have the same number of rows")
+
+        # Remember the columns used for grouping so predict can use them
+        self.columns_ = list(X.columns)
+
+        # Create a combined DataFrame so we can group by all feature columns
+        df = X.copy()
+        df["target"] = y
+
+        # Group and aggregate using the requested estimator
+        if self.estimate == "mean":
+            self.grouped_data = (
+                df.groupby(self.columns_)["target"].mean().reset_index()
+            )
+        else:
+            self.grouped_data = (
+                df.groupby(self.columns_)["target"].median().reset_index()
+            )
 
     def predict(self, X):
-        """
-        Predict estimates for new data.
+        """Predict group-level estimates for X.
 
-        Parameters:
-        X (array-like or DataFrame): Observations to predict.
+        Parameters
+        ----------
+        X : array-like or pd.DataFrame
+            Feature table with same columns as fit.
 
-        Returns:
-        np.ndarray: Predicted estimates, with NaN for missing groups.
+        Returns
+        -------
+        np.ndarray
+            Predicted targets, NaN for missing groups.
         """
+        # Convert to DataFrame for the merge operation
         X = pd.DataFrame(X)
-        # Merge with grouped data to get predictions
-        predictions = X.merge(self.grouped_data, on=list(X.columns), how='left')
-        if self.default_category is not None:
-            # Fill missing predictions with default category estimates
-            missing_mask = predictions['target'].isna()
-            if missing_mask.any():
-                default_merge = X.loc[missing_mask, [self.default_category]].merge(self.default_grouped, on=self.default_category, how='left')
-                predictions.loc[missing_mask, 'target'] = default_merge['target']
-        missing_count = predictions['target'].isna().sum()
+
+        # Merge the input with the grouped estimates on the original columns
+        preds = X.merge(self.grouped_data, on=self.columns_, how="left")
+
+        # Count how many rows had no matching group (they become NaN)
+        missing_count = preds["target"].isna().sum()
         if missing_count > 0:
+            # Informational message to help debugging missing groups
             print(f"Number of missing groups: {missing_count}")
-        return np.array(predictions['target'].tolist())    
-    
+
+        # Return the target column as a numpy array (preserves NaN where missing)
+        return preds["target"].to_numpy()
+
