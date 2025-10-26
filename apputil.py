@@ -68,30 +68,18 @@ class GroupEstimate:
             )
 
     def predict(self, X):
-        """Predict group-level estimates for X.
 
-        Parameters
-        ----------
-        X : array-like or pd.DataFrame
-            Feature table with same columns as fit.
+        """Predict group-level estimates for X."""
 
-        Returns
-        -------
-        np.ndarray
-            Predicted targets, NaN for missing groups.
-        """
-        # Convert to DataFrame for the merge operation
-        X = pd.DataFrame(X)
+        # Ensure input is a DataFrame with correct columns
+        X = pd.DataFrame(X, columns=self.columns_) if isinstance(X, np.ndarray) else pd.DataFrame(X)
+        X.columns = self.columns_  # enforce column names
 
-        # Merge the input with the grouped estimates on the original columns
+        # Merge with grouped data to get predictions
         preds = X.merge(self.grouped_data, on=self.columns_, how="left")
 
-        # Count how many rows had no matching group (they become NaN)
         missing_count = preds["target"].isna().sum()
         if missing_count > 0:
-            # Informational message to help debugging missing groups
-            print(f"Number of missing groups: {missing_count}")
+         print(f"Number of missing groups: {missing_count}")
 
-        # Return the target column as a numpy array (preserves NaN where missing)
         return preds["target"].to_numpy()
-
